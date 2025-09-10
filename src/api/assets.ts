@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync } from "fs";
-import path from "path";
 
+import path from "path";
 import type { ApiConfig } from "../config";
 
 export function ensureAssetsDir(cfg: ApiConfig) {
@@ -23,4 +23,8 @@ export function getAssetDiskPath(cfg: ApiConfig, assetPath: string) {
 
 export function getAssetURL(cfg: ApiConfig, assetPath: string) {
   return `http://localhost:${cfg.port}/assets/${assetPath}`;
+}
+
+export function getS3URL(cfg: ApiConfig, fileKey: string) {
+  return `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${fileKey}`;
 }
