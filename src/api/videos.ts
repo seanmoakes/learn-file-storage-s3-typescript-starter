@@ -5,8 +5,10 @@ import type { BunRequest } from "bun";
 import { getBearerToken, validateJWT } from "../auth";
 import { getVideo, updateVideo } from "../db/videos";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
-import { randomBytes, type UUID } from "crypto";
-import { mediaTypeToExt, getAssetDiskPath, getS3URL } from "./assets";
+import { type UUID } from "crypto";
+import { getS3URL } from "./assets";
+import path from "path";
+import { uploadVideoToS3 } from "../s3";
 
 export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const MAX_UPLOAD_SIZE = 1 << 30; // 1GB
@@ -33,7 +35,6 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Video file missing");
   }
 
-
   if (file.size > MAX_UPLOAD_SIZE) {
     throw new BadRequestError(
       "Video size exceeds the maximum allowed size of 1GB",
@@ -48,23 +49,62 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Video is not an mp4 file");
   }
 
-  const ext = mediaTypeToExt(mediaType);
-  const fileId = randomBytes(32).toString("base64url");
-  const filename = `${fileId}${ext}`;
+  const tempFilePath = path.join("/tmp", `${videoId}.mp4`);
+  await Bun.write(tempFilePath, file);
 
-  const assetDiskPath = getAssetDiskPath(cfg, filename);
-  await Bun.write(assetDiskPath, file);
+  const aspectRatio = await getVideoAspectRatio(tempFilePath)
+  const key = `${aspectRatio}/${videoId}.mp4`;
+  await uploadVideoToS3(cfg, key, tempFilePath, "video/mp4");
 
-  const s3File = cfg.s3Client.file(filename);
-  await s3File.write(Bun.file(assetDiskPath), {
-    type: mediaType,
-  });
-
-  const urlPath = getS3URL(cfg, filename);
+  const urlPath = getS3URL(cfg, key);
   video.videoURL = urlPath;
 
-  await Bun.file(assetDiskPath).delete();
+  await Bun.file(tempFilePath).delete();
   updateVideo(cfg.db, video);
 
   return respondWithJSON(200, null);
+}
+
+export async function getVideoAspectRatio(filePath: string) {
+  const proc = Bun.spawn(
+    [
+      "ffprobe",
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height",
+      "-of",
+      "json",
+      filePath
+    ],
+    {
+      stdout: "pipe",
+      stderr: "pipe"
+    },
+  );
+
+
+  const outputText = await new Response(proc.stdout).text();
+  const errorText = await new Response(proc.stderr).text();
+
+  const exitCode = await proc.exited;
+
+  if (exitCode !== 0) {
+    throw new Error(`ffprobe error: ${errorText}`);
+  }
+
+  const output = JSON.parse(outputText);
+  if (!output.streams || output.streams.length === 0) {
+    throw new Error("No video streams found");
+  }
+
+  const { width, height } = output.streams[0];
+
+  return width === Math.floor(16 * (height / 9))
+    ? "landscape"
+    : height === Math.floor(16 * (width / 9))
+      ? "portrait"
+      : "other";
 }
