@@ -4,7 +4,8 @@ import { getVideo, updateVideo } from "../db/videos";
 import type { ApiConfig } from "../config";
 import type { BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
-import { getDataURL } from "./assets";
+import { getAssetDiskPath, getAssetURL, mediaTypeToExt } from "./assets";
+import { randomBytes } from "crypto";
 
 export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   const { videoId } = req.params as { videoId?: string };
@@ -22,7 +23,6 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   if (userID !== video?.userID) {
     throw new UserForbiddenError("Not authorized to update this video");
   }
-  console.log("uploading thumbnail for video", videoId, "by user", userID);
 
   const formData = await req.formData();
   const file = formData.get("thumbnail");
@@ -42,16 +42,20 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   if (!mediaType) {
     throw new BadRequestError("Missing Content-Type for thumbnail")
   }
-
-  const fileData = await file.arrayBuffer();
-  if (!fileData) {
-    throw new Error("Error reading file data");
+  if (!(mediaType === "image/png" || mediaType === "image/jpeg")) {
+    throw new BadRequestError("Thumbnail is not a png or jpeg file");
   }
 
-  const base64Encoded = Buffer.from(fileData).toString("base64");
-  const base64DataURL = getDataURL(mediaType, base64Encoded);
+  const ext = mediaTypeToExt(mediaType);
+  const fileId = randomBytes(32).toString("base64url");
+  const filename = `${fileId}${ext}`;
 
-  video.thumbnailURL = base64DataURL;
+  const assetDiskPath = getAssetDiskPath(cfg, filename);
+  await Bun.write(assetDiskPath, file);
+
+  const urlPath = getAssetURL(cfg, filename);
+  video.thumbnailURL = urlPath;
+
   updateVideo(cfg.db, video);
 
   return respondWithJSON(200, null);
