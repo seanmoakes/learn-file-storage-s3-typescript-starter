@@ -26,5 +26,5 @@ export function getAssetURL(cfg: ApiConfig, assetPath: string) {
 }
 
 export function getS3URL(cfg: ApiConfig, fileKey: string) {
-  return `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${fileKey}`;
+  return `https://${cfg.s3CfDistribution}/${fileKey}`;
 }

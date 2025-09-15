@@ -6,9 +6,9 @@ import { getBearerToken, validateJWT } from "../auth";
 import { getVideo, updateVideo } from "../db/videos";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import { type UUID } from "crypto";
-import { getS3URL } from "./assets";
 import path from "path";
 import { uploadVideoToS3 } from "../s3";
+import { getS3URL } from "./assets";
 
 export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const MAX_UPLOAD_SIZE = 1 << 30; // 1GB
@@ -52,21 +52,24 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const tempFilePath = path.join("/tmp", `${videoId}.mp4`);
   await Bun.write(tempFilePath, file);
 
+  const aspectRatio = await getVideoAspectRatio(tempFilePath)
   const processedFilePath = await processVideoForFastStart(tempFilePath);
 
-  const aspectRatio = await getVideoAspectRatio(processedFilePath)
   const key = `${aspectRatio}/${videoId}.mp4`;
   await uploadVideoToS3(cfg, key, processedFilePath, "video/mp4");
 
-  const urlPath = getS3URL(cfg, key);
-  video.videoURL = urlPath;
+  // const urlPath = getS3URL(cfg, key);
+  video.videoURL = getS3URL(cfg, key);
+
+  updateVideo(cfg.db, video);
 
   await Bun.file(tempFilePath).delete();
   await Bun.file(processedFilePath).delete();
-  updateVideo(cfg.db, video);
 
   return respondWithJSON(200, null);
 }
+
+
 
 export async function getVideoAspectRatio(filePath: string) {
   const proc = Bun.spawn(

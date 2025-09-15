@@ -50,7 +50,7 @@ export async function handlerVideoGet(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Invalid video ID");
   }
 
-  const video = getVideo(cfg.db, videoId);
+  let video = getVideo(cfg.db, videoId);
   if (!video) {
     throw new NotFoundError("Couldn't find video");
   }
